@@ -1,11 +1,20 @@
 import adsk.core
 import os
 import math
+import traceback
 from ...lib import fusion360utils as futil
 from ... import config
 from .resources.ScrewSize import screewSize
 app = adsk.core.Application.get()
 ui = app.userInterface
+des = adsk.fusion.Design.cast(app.activeProduct)
+   
+importManager = app.importManager 
+            # Get active design
+   
+            
+            # Get root component
+rootComp = des.rootComponent
 
 
 # TODO *** Specify the command identity information. ***
@@ -77,6 +86,7 @@ def stop():
 # This defines the contents of the command dialog and connects to the command related events.
 def command_created(args: adsk.core.CommandCreatedEventArgs):
     # General logging for debug.
+
     futil.log(f'{CMD_NAME} Command Created Event')
 
     # https://help.autodesk.com/view/fusion360/ENU/?contextId=CommandInputs
@@ -90,8 +100,8 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     selectionInput.setSelectionLimits(0)
     selectionInput.addSelectionFilter("CircularEdges")
 
-    inputs.addTextBoxCommandInput(
-        'text_box', 'Some Text', 'Enter some text.', 1, False)
+    # inputs.addTextBoxCommandInput(
+    #     'text_box', 'Some Text', 'Enter some text.', 1, False)
     dropdownInput = inputs.addDropDownCommandInput(
         'head', 'Head type', adsk.core.DropDownStyles.TextListDropDownStyle)
     dropdownItems = dropdownInput.listItems
@@ -99,6 +109,13 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     dropdownItems.add('Rounded', False, 'resources/Rounded')
     dropdownItems.add('Hex', False, 'resources/Hex')
     dropdownItems.add('Flat', False, 'resources/Flat')
+
+    dropdownInput3 = inputs.addDropDownCommandInput(
+        'head_slot', 'Head slot', adsk.core.DropDownStyles.TextListDropDownStyle)
+    dropdownItems3 = dropdownInput3.listItems
+    dropdownItems3.add('Torx', False, 'resources/Socket')
+    dropdownItems3.add('Hex', False, 'resources/Rounded')
+    dropdownItems3.add('Philips', False, 'resources/Hex')
 
     inputs.addBoolValueInput("flip", "Flip", True)
 
@@ -108,10 +125,7 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
 
     for key, value in screewSize['hex'].items():
         dropdownItems2.add(key, False, 'resources/'+key)
-    #    print(value)
-
-    # for i in screewSize['hex'][1:]:
-
+    
     # Create a value input field and set the default using 1 unit of the default length unit.
     defaultLengthUnits = app.activeProduct.unitsManager.defaultLengthUnits
     default_value = adsk.core.ValueInput.createByString('1')
@@ -120,57 +134,61 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     # TODO Connect to the events that are needed by this command.
     futil.add_handler(args.command.execute, command_execute,
                       local_handlers=local_handlers)
-    futil.add_handler(args.command.inputChanged,
-                      command_input_changed, local_handlers=local_handlers)
-    futil.add_handler(args.command.executePreview,
-                      command_preview, local_handlers=local_handlers)
-    futil.add_handler(args.command.validateInputs,
-                      command_validate_input, local_handlers=local_handlers)
-    futil.add_handler(args.command.destroy, command_destroy,
-                      local_handlers=local_handlers)
+    # futil.add_handler(args.command.inputChanged,
+    #                   command_input_changed, local_handlers=local_handlers)
+    # futil.add_handler(args.command.executePreview,
+    #                   command_preview, local_handlers=local_handlers)
+    # futil.add_handler(args.command.validateInputs,
+    #                   command_validate_input, local_handlers=local_handlers)
+    # futil.add_handler(args.command.destroy, command_destroy,
+    #                   local_handlers=local_handlers)
 
 
 # This event handler is called when the user clicks the OK button in the command dialog or
 # is immediately called after the created event not command inputs were created for the dialog.
 def command_execute(args: adsk.core.CommandEventArgs):
     # General logging for debug.
-
     futil.log(f'{CMD_NAME} Command Execute Event')
-
     # TODO ******************************** Your code here ********************************
 
     # Get a reference to your command's inputs.
     inputs = args.command.commandInputs
     selection: adsk.core.SelectionCommandInput = inputs.itemById('selection')
-    text_box: adsk.core.TextBoxCommandInput = inputs.itemById('text_box')
+    # text_box: adsk.core.TextBoxCommandInput = inputs.itemById('text_box')
     head: adsk.core.DropDownCommandInput = inputs.itemById('head')
-
+    headslot: adsk.core.DropDownCommandInput = inputs.itemById('head_slot')
     lenght: adsk.core.ValueCommandInput = inputs.itemById('lenght')
     thread: adsk.core.DropDownCommandInput = inputs.itemById('thread')
     flip: adsk.core.BoolValueCommandInput = inputs.itemById('flip')
+
     circle = []
 
     for i in range(selection.selectionCount):
         circle.append(selection.selection(i))
 
     headType = head.selectedItem.name
-
+    headSlot = headslot.selectedItem.name
     # Do something interesting
     thread = thread.selectedItem.name
 
-    text = text_box.text
     expression = lenght.expression
-    des = adsk.fusion.Design.cast(app.activeProduct)
-    for parent in circle:
+    screw, leng = createScrew(headType, thread, expression, headSlot)
+    bodyInSubComp1 = screw.bRepBodies.item(0)
 
-        if headType == 'Hex':
-            child = create_hex_screew(des, thread, expression)
-        if headType == 'Rounded':
-            child = create_rounded_screew(des,  thread, expression)
-        if headType == 'Flat':
-            create_flat_screew(thread, expression)
-        if headType == 'Socket':
-            create_socket_screew(thread, expression)
+    # ui.messageBox(str(screw))
+    for parent in circle:
+        newScrewComp = rootComp.occurrences.addNewComponent(adsk.core.Matrix3D.create())
+        newScrewComp.component.name = f'Screw {thread}x{expression}'
+        newScrew = newScrewComp.component.features.copyPasteBodies.add(bodyInSubComp1)
+        for i in range(newScrew.bodies.item(0).faces.count):
+            face = newScrew.bodies.item(0).faces.item(i)
+            if abs(face.centroid.z)<0.001 :
+            # if face.centroid.asArray() == [0,0,0] :
+               
+                child = face.edges.item(0)
+           
+
+        
 
         vectorToFace, normVector = normalVector(parent.entity)
         # # Create the second joint geometry with the sketch line
@@ -178,27 +196,23 @@ def command_execute(args: adsk.core.CommandEventArgs):
             parent.entity, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
 
         geo0 = adsk.fusion.JointGeometry.createByCurve(
-            child.item(0), adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
-        
+            child, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
 
-        flipDir = geo1.primaryAxisVector.dotProduct(normVector)
+        flipDir = geo0.primaryAxisVector.dotProduct(vectorToFace)
+       
+        # def r(vec):
+        #     return str(round(vec.x,5))+" "+ str(round(vec.x,5)) +" " +str(round(vec.x,5)) +'\n'
+
+        # ui.messageBox('cv'+r(cv1)+r(cv2)+r(cv3)+"bv"+r(bv1)+r(bv2)+r(bv3)+"nv"+r(nv)+"vf"+r(vf))
+
 
         origin = vectorToFace.dotProduct(adsk.core.Vector3D.create(1, 1, 1))
 
-       
-        if origin >= 0:
-            if flipDir < 0:
-                isflip = True
-            else:
-                isflip = False
-        else:
-            if flipDir < 0:
-                isflip = True
-            else:
-                isflip = False
+        
+
 
         # Create joint input
-        rootComp = des.rootComponent
+        # rootComp = des.rootComponent
 
         joints = rootComp.joints
         # ui.messageBox('here')
@@ -207,15 +221,22 @@ def command_execute(args: adsk.core.CommandEventArgs):
         # Set the joint input
         angle = adsk.core.ValueInput.createByString('0 deg')
         jointInput.angle = angle
-        jointInput.isFlipped = isflip
+        jointInput.isFlipped = not flip.value
         jointInput.setAsRigidJointMotion()
         # Create the joint
         joint = joints.add(jointInput)
+    occurrences = rootComp.allOccurrencesByComponent(screw)
+    for occurrence in occurrences:
+        occurrence.deleteMe()
+
+            # Delete them.
+    # for uniqueOccurrencesI in uniqueOccurrences:
+    #             uniqueOccurrencesI.deleteMe()
+    # screw.deleteMe()
 
         # Lock the joint
         # joint.isLocked = True
 
-    
 
 # This event handler is called when the command needs to compute a new preview in the graphics window.
 def command_preview(args: adsk.core.CommandEventArgs):
@@ -390,12 +411,20 @@ def create_hex_screew(design, thread, lenght):
 
         zaxis = newComp.zConstructionAxis
         revolves = newComp.features.revolveFeatures
+        ui.messageBox(str(bd))
+
         revProf1 = revolveSketchTwo.profiles[0]
         revInput1 = revolves.createInput(
             revProf1, zaxis, adsk.fusion.FeatureOperations.CutFeatureOperation)
 
+        bodys = []
+        bodys.append(headExt)
+
         revAngle = adsk.core.ValueInput.createByReal(math.pi*2)
         revInput1.setAngleExtent(False, revAngle)
+        ui.messageBox(str(revInput1.participantBodies))
+
+        revInput1.participantBodies = bodys
         revolves.add(revInput1)
 
         revProf2 = revolveSketchOne.profiles[0]
@@ -403,6 +432,8 @@ def create_hex_screew(design, thread, lenght):
             revProf2, zaxis, adsk.fusion.FeatureOperations.CutFeatureOperation)
 
         revInput2.setAngleExtent(False, revAngle)
+        revInput2.participantBodies = bodys
+
         revolves.add(revInput2)
 
         sideFace = bodyExt.sideFaces[0]
@@ -655,30 +686,129 @@ def normalVector(edge):
         face = edge.faces.item(0)
 
     point = face.centroid
-   
-    
+
     des = adsk.fusion.Design.cast(app.activeProduct)
     rootComp = des.rootComponent
-    
+
     planes = rootComp.constructionPlanes
     planeInput = planes.createInput()
 
     offsetValue = adsk.core.ValueInput.createByReal(3.0)
     planeInput.setByOffset(face, offsetValue)
     planeOne = planes.add(planeInput)
-    
+
     measureManager = app.measureManager
     measureResult = measureManager.measureMinimumDistance(point, planeOne)
     point1 = measureResult.positionOne
     point2 = measureResult.positionTwo
-    
+
     vectorToFace = point2.vectorTo(point1)
+    # ui.messageBox('1')
     planeOne.deleteMe()
 
     _, normVector = face.evaluator.getNormalAtPoint(point)
     return vectorToFace, normVector
-   
+
     # crossProduct = normalAtFace.crossProduct(vectorToFace)
 
+
+def createScrew(headType, thread, lenght, headSlot):
+    bodyDiameter = screewSize['hex'][thread][0]/10
+    # headDiameter = screewSize['hex'][thread][1]/10
+    # headHeight = screewSize['hex'][thread][2]/10
+    chamferDistance = bodyDiameter/10
+    # cutAngle = screewSize['hex'][thread][4]/180*math.pi
+    # filletRadius = screewSize['hex'][thread][5]/10
+    bodyLength = int(lenght.split(' ')[0])/10
+    boltName = str(thread) + 'x' + str(int((bodyLength)*10))
+  
+    # ui.messageBox('1')
+    # app = adsk.core.Application.get()
+    # importManager = app.importManager 
+    #         # Get active design
+    # product = app.activeProduct
+    # design = adsk.fusion.Design.cast(product)
+            
+    #         # Get root component
+
+
+  
+
+    archiveFileName = os.path.join(ICON_FOLDER,'Screw',headType,headSlot,thread+".f3d")
+
+    # archiveFileName = './Screew/Rounded/Torx/M2.f3d'
+    archiveOptions = importManager.createFusionArchiveImportOptions(
+        archiveFileName)
     
+    # Import archive file to root component
+    try:
+        head = importManager.importToTarget2(archiveOptions, rootComp)
+    except: 
+        if ui:
+            ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
+
+    headComp = head.item(0).component
+    headComp.name = boltName
+
+
+    sketches = headComp.sketches
+    xyPlane = headComp.xYConstructionPlane
+    xzPlane = headComp.xZConstructionPlane
+    sketch = sketches.add(xyPlane)
+    center = adsk.core.Point3D.create(0, 0, 0)
+    extrudes = headComp.features.extrudeFeatures
+    bodySketch = sketches.add(xyPlane)
+    bodySketch.sketchCurves.sketchCircles.addByCenterRadius(
+        center, bodyDiameter/2)
+
+    bodyProf = bodySketch.profiles[0]
+
+    bodyExtInput = extrudes.createInput(
+        bodyProf, adsk.fusion.FeatureOperations.JoinFeatureOperation)
+
+    bodyExtInput.setAllExtent(
+        adsk.fusion.ExtentDirections.NegativeExtentDirection)
+
+    bodyExtInput.setDistanceExtent(
+        False, adsk.core.ValueInput.createByReal(-1*bodyLength))
+    bodyExt = extrudes.add(bodyExtInput)
+
+    # create chamfer
+
+    edgeCol = adsk.core.ObjectCollection.create()
+    edges = bodyExt.endFaces[0].edges
+    for edgeI in edges:
+        edgeCol.add(edgeI)
+    chamferFeats = headComp.features.chamferFeatures
+    chamferInput = chamferFeats.createInput(edgeCol, True)
+    chamferInput.setToEqualDistance(
+        adsk.core.ValueInput.createByReal(chamferDistance))
+    chamferFeats.add(chamferInput)
+
+    edgeCol.clear()
+    loops = bodyExt.sideFaces.item(0).edges.item(0).length
+    sideFace = bodyExt.sideFaces[0]
+    threads = headComp.features.threadFeatures
+    threadDataQuery = threads.threadDataQuery
+    defaultThreadType = threadDataQuery.defaultMetricThreadType
+    recommendData = threadDataQuery.recommendThreadData(bodyDiameter, False, defaultThreadType)
+    if recommendData[0]:
+             threadInfo = threads.createThreadInfo(
+                 False, defaultThreadType, recommendData[1], recommendData[2])
+
+    faces = adsk.core.ObjectCollection.create()
+
+    faces.add(sideFace)
+    threadInput = threads.createInput(faces, threadInfo)
+    threads.add(threadInput)
+
+    # edgeLoop = None
+    # for edgeLoop in loops:
+    #         ui.messageBox(str(edgeLoop))
+    #         # since there two edgeloops in the start face of head, one consists of one circle edge while the other six edges
+    #         if (len(edgeLoop.edges) == 1):
+    #             break
+
+    # edgeCol.add(edgeLoop.edges[0])
+    return headComp,loops
 
