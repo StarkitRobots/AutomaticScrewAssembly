@@ -211,8 +211,12 @@ def command_execute(args: adsk.core.CommandEventArgs):
         # Create the joint
         joint = joints.add(jointInput)
     occurrences = rootComp.allOccurrencesByComponent(screw)
+    features = rootComp.features
+    removeFeatures = features.removeFeatures
+    
     for occurrence in occurrences:
-        occurrence.deleteMe()
+        removeFeatures.add(occurrence)
+
 
             # Delete them.
     # for uniqueOccurrencesI in uniqueOccurrences:
@@ -817,7 +821,10 @@ def createScrew(headType, thread, lenght, headSlot):
 
     edgeCol.clear()
     loops = bodyExt.sideFaces.item(0).edges.item(0).length
-    sideFace = bodyExt.sideFaces[0]
+    for i in range(bodyExt.sideFaces.count):
+        if bodyExt.sideFaces[i].geometry.surfaceType == 1:
+            sideFace = bodyExt.sideFaces[i]
+
     threads = headComp.features.threadFeatures
     threadDataQuery = threads.threadDataQuery
     defaultThreadType = threadDataQuery.defaultMetricThreadType
