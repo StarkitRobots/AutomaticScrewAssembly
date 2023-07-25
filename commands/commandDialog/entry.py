@@ -19,8 +19,8 @@ rootComp = des.rootComponent
 
 # TODO *** Specify the command identity information. ***
 CMD_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_cmdDialog'
-CMD_NAME = 'ScrewJoint'
-CMD_Description = 'A Fusion 360 Add-in Command with a dialog'
+CMD_NAME = 'ScrewAssembler'
+CMD_Description = 'Add multiply screw joints'
 
 # Specify that the command will be promoted to the panel.
 IS_PROMOTED = True
@@ -30,7 +30,7 @@ IS_PROMOTED = True
 # command it will be inserted beside. Not providing the command to position it
 # will insert it at the end.
 WORKSPACE_ID = 'FusionSolidEnvironment'
-PANEL_ID = 'SolidScriptsAddinsPanel'
+PANEL_ID = 'AssemblePanel'
 COMMAND_BESIDE_ID = 'ScriptsManagerCommand'
 
 # Resource location for command icons, here we assume a sub folder in this directory named "resources".
@@ -105,37 +105,40 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     dropdownInput = inputs.addDropDownCommandInput(
         'head', 'Head type', adsk.core.DropDownStyles.TextListDropDownStyle)
     dropdownItems = dropdownInput.listItems
+    
     dropdownItems.add('Socket', False, 'resources/Socket')
     dropdownItems.add('Rounded', False, 'resources/Rounded')
     dropdownItems.add('Hex', False, 'resources/Hex')
     dropdownItems.add('Flat', False, 'resources/Flat')
 
-    dropdownInput3 = inputs.addDropDownCommandInput(
-        'head_slot', 'Head slot', adsk.core.DropDownStyles.TextListDropDownStyle)
-    dropdownItems3 = dropdownInput3.listItems
-    dropdownItems3.add('Torx', False, 'resources/Socket')
-    dropdownItems3.add('Hex', False, 'resources/Rounded')
-    dropdownItems3.add('Philips', False, 'resources/Hex')
+    slot = inputs.addDropDownCommandInput(
+        'head_slot', 'Head slot', adsk.core.DropDownStyles.LabeledIconDropDownStyle)
+    slot.isVisible = False
+    
 
-    inputs.addBoolValueInput("flip", "Flip", True)
-
-    dropdownInput2 = inputs.addDropDownCommandInput(
+    
+    thread = inputs.addDropDownCommandInput(
         'thread', 'Thread', adsk.core.DropDownStyles.TextListDropDownStyle)
-    dropdownItems2 = dropdownInput2.listItems
+    thread.isVisible = False
 
-    for key, value in screewSize['hex'].items():
-        dropdownItems2.add(key, False, 'resources/'+key)
+    # dropdownItems2 = dropdownInput2.listItems
+
+    # for key, value in screewSize['hex'].items():
+    #     dropdownItems2.add(key, False, 'resources/'+key)
     
     # Create a value input field and set the default using 1 unit of the default length unit.
     defaultLengthUnits = app.activeProduct.unitsManager.defaultLengthUnits
     default_value = adsk.core.ValueInput.createByString('1')
-    inputs.addValueInput('lenght', 'Lenght', defaultLengthUnits, default_value)
+    lenght = inputs.addValueInput('lenght', 'Lenght', defaultLengthUnits, default_value)
+    lenght.isVisible = False
+    flip = inputs.addBoolValueInput("flip", "Flip", True)
+    flip.isVisible = False
 
     # TODO Connect to the events that are needed by this command.
     futil.add_handler(args.command.execute, command_execute,
                       local_handlers=local_handlers)
-    # futil.add_handler(args.command.inputChanged,
-    #                   command_input_changed, local_handlers=local_handlers)
+    futil.add_handler(args.command.inputChanged,
+                      command_input_changed, local_handlers=local_handlers)
     # futil.add_handler(args.command.executePreview,
     #                   command_preview, local_handlers=local_handlers)
     # futil.add_handler(args.command.validateInputs,
@@ -188,9 +191,6 @@ def command_execute(args: adsk.core.CommandEventArgs):
                 child = face.edges.item(0)
            
 
-        
-
-        vectorToFace, normVector = normalVector(parent.entity)
         # # Create the second joint geometry with the sketch line
         geo1 = adsk.fusion.JointGeometry.createByCurve(
             parent.entity, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
@@ -198,21 +198,6 @@ def command_execute(args: adsk.core.CommandEventArgs):
         geo0 = adsk.fusion.JointGeometry.createByCurve(
             child, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
 
-        flipDir = geo0.primaryAxisVector.dotProduct(vectorToFace)
-       
-        # def r(vec):
-        #     return str(round(vec.x,5))+" "+ str(round(vec.x,5)) +" " +str(round(vec.x,5)) +'\n'
-
-        # ui.messageBox('cv'+r(cv1)+r(cv2)+r(cv3)+"bv"+r(bv1)+r(bv2)+r(bv3)+"nv"+r(nv)+"vf"+r(vf))
-
-
-        origin = vectorToFace.dotProduct(adsk.core.Vector3D.create(1, 1, 1))
-
-        
-
-
-        # Create joint input
-        # rootComp = des.rootComponent
 
         joints = rootComp.joints
         # ui.messageBox('here')
@@ -250,6 +235,51 @@ def command_preview(args: adsk.core.CommandEventArgs):
 def command_input_changed(args: adsk.core.InputChangedEventArgs):
     changed_input = args.input
     inputs = args.inputs
+
+    if changed_input.id == "head":
+        
+        slot = inputs.itemById('head_slot')
+        thread = inputs.itemById('thread')
+
+        slotItems = slot.listItems
+        slotItems.clear()
+        
+        threadItems = thread.listItems
+        threadItems.clear()
+
+        lenght = inputs.itemById('lenght')
+        flip = inputs.itemById('flip')
+
+        if changed_input.selectedItem.name == "Rounded":
+            slotItems.add('Torx', False, os.path.join(ICON_FOLDER,'Slot','Torx'))
+            slotItems.add('Hex', False, os.path.join(ICON_FOLDER,'Slot','Hex'))
+            slotItems.add('Philips', False, os.path.join(ICON_FOLDER,'Slot','Philips'))
+
+            for i in ['M2','M2.5','M3','M4','M5', 'M6', 'M8', 'M10']:
+                threadItems.add(i, False, 'resourse/')
+
+
+            
+        if changed_input.selectedItem.name == "Socket":
+            slotItems.add('Torx', False, os.path.join(ICON_FOLDER,'Slot','Torx'))
+            slotItems.add('Hex', False, os.path.join(ICON_FOLDER,'Slot','Hex'))
+
+            for i in ['M2','M2.5','M3','M4','M5', 'M6', 'M8', 'M10', 'M12', 'M14', 'M16','M18', 'M20', 'M22', 'M24']:
+                threadItems.add(i, False, 'resourse/')
+
+        if changed_input.selectedItem.name == "Flat":
+            slotItems.add('Torx', False, os.path.join(ICON_FOLDER,'Slot','Torx'))
+            slotItems.add('Hex', False, os.path.join(ICON_FOLDER,'Slot','Hex'))
+            slotItems.add('Philips', False, os.path.join(ICON_FOLDER,'Slot','Philips'))
+        
+        if changed_input.selectedItem.name == "Hex": 
+            slotItems.add('Hex', False, os.path.join(ICON_FOLDER,'Slot','Hex'))
+            slotItems.add('Philips', False, os.path.join(ICON_FOLDER,'Slot','Philips'))
+        slot.isVisible = True
+        thread.isVisible = True
+        lenght.isVisible = True
+        flip.isVisible = True
+
 
     # General logging for debug.
     futil.log(
